@@ -10,6 +10,7 @@ dataset = torchvision.datasets.ImageFolder(root, transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, shuffle=True, batch_size=4)
 class BaseModel(nn.Module):
     def __init__(self):
+        super().__init__()
         def init_func(m):
             classname = m.__class__.__name__
             if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
@@ -30,8 +31,8 @@ class Encoder(BaseModel):
         layers.append(nn.Conv2d(in_channels,hidden_channels,3,1,1))
         layers.append(nn.ELU(True))
         prev = hidden_channels
-        for idx in range(1,5):
-            if idx != 4:
+        for idx in range(1,4):
+            if idx != 3:
                 next = (idx+1)*hidden_channels
             layers.append(nn.Conv2d(prev,prev,3,1,1))
             layers.append(nn.ELU(True))
@@ -42,7 +43,7 @@ class Encoder(BaseModel):
         self.conv_ouput_dim = [next,8,8]
         self.fc1 = nn.Linear(8*8*next, z_num)
     def forward(self,x):
-        x = torch.flatten(self.conv1(x))
+        x = torch.flatten(self.conv1(x),1)
         x = self.fc1(x)
         return x
 
@@ -53,12 +54,12 @@ class Decoder(BaseModel):
         self.conv_input_dim = [cin,8,8]
         self.fc1 = nn.Linear(zn,8*8*cin)
         layers = []
-        for i in range(4):
+        for i in range(3):
             layers.append(nn.Conv2d(cin,cin,3,1,1))
             layers.append(nn.ELU(True))
             layers.append(nn.Conv2d(cin, cin, 3, 1, 1))
             layers.append(nn.ELU(True))
-            if i != 3:
+            if i != 2:
                 layers.append(nn.UpsamplingNearest2d(scale_factor=2))
         layers.append(nn.Conv2d(cin,cout,3,1,1))
         layers.append(nn.ELU(True))
@@ -70,6 +71,7 @@ class Decoder(BaseModel):
 
 class Discriminator(nn.Module):
     def __init__(self,cin,cout,nz):
+        super().__init__()
         self.encoder = Encoder(cin,cout,nz)
         self.decoder = Decoder(cout,cin,nz)
     def forward(self,x):
@@ -79,6 +81,7 @@ class Discriminator(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self,cin,cout,nz):
+        super().__init__()
         self.decoder = Decoder(cin,cout,nz)
     def forward(self,x):
         x = self.decoder(x)
