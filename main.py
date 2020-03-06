@@ -6,6 +6,7 @@ import logging
 import os
 import numpy as np
 from PIL import Image
+from glob import glob
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cin',type=int, default=3)
@@ -15,15 +16,14 @@ parser.add_argument('--ngpu', type=int,default=1)
 parser.add_argument('--batch_size', type=int,default=16)
 parser.add_argument('--lr', type=float,default=0.0001)
 parser.add_argument('--lk', type=float, default= 0.)
-parser.add_argument('--epochs',type=int, default=100)
+parser.add_argument('--max_iter',type=int, default=800000)
 parser.add_argument('--data', type=str, default='data')
-parser.add_argument('--ulr',type=int, default=100)
 parser.add_argument('--input_size',type=int, default=64)
 parser.add_argument('--betas',type=int, nargs='+', default=[0.5,0.999])
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--iter_log', type=int, default=100)
-parser.add_argument('--iter_save',type=int, default=100)
-parser.add_argument('--iter_sample',type=int, default=100)
+parser.add_argument('--iter_log', type=int, default=1)
+parser.add_argument('--iter_save',type=int, default=1)
+parser.add_argument('--iter_sample',type=int, default=1)
 
 
 args = parser.parse_args()
@@ -46,6 +46,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 G = Generator(args.cout, args.cin, args.nz).to(device)
 D = Discriminator(args.cin, args.cout, args.nz).to(device)
 
+
 if len(args.ngpu) > 0:
     G = torch.nn.DataParallel(G, args.ngpu)
     D = torch.nn.DataParallel(D, args.ngpu)
@@ -53,70 +54,110 @@ if len(args.ngpu) > 0:
 optimG = torch.optim.Adam(G.parameters(), lr=args.lr, betas=args.betas)
 optimD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=args.betas)
 
+def load_model(sample_dir):
+    global G, D
 
-k_t = 0
-g_iteration = 0
-gamma = 0.5
-lr_k = 0.001
-img_sample_size = (5,5)
-n_img_sample = np.prod(img_sample_size)
-fixed_noise = torch.empty(args.batch_size,args.nz, device=device).uniform_(-1,1)
-loss_D_history = []
-loss_G_history = []
 
-def train(config,G,D):
+    paths = glob(os.path.join(sample_dir, '*_gen.pth'))
+    if len(paths) == 0:
+        print(f'[!] no checkpoint found in {sample_dir}')
+        return
+    paths = sorted(paths)
+    indexes = [os.path.basename(p).split('_')[0] for p in paths]
+    start = max(indexes)
 
-    for i in range(config.epochs):
-        for iter, (inputs, _) in enumerate(dataloader):
+    print(f'load from {sample_dir}/{start} iteration...')
+    G.load_state_dict(torch.load(f'{sample_dir}/{start}_gen.pth')['state'])
+    D.load_state_dict(torch.load(f'{sample_dir}/{start}_dis.pth')['state'])
+
+
+
+
+def train(config,G,D,optimG,optimD):
+    k_t = 0
+    g_iteration = 0
+    gamma = 0.5
+    lr_k = 0.001
+    epoch = 0
+    fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
+    measure_history = []
+    x_fixed, _ = next(iter(dataloader))
+    torchvision.utils.save_image(x_fixed, f'{sample_dir}/x_fixed.png')
+    need_train = True
+    while need_train:
+        epoch += 1
+        print(f'{epoch} epoch running')
+        for it, (inputs, _) in enumerate(dataloader):
+            if config.max_iter < g_iteration:
+                need_train = False
+                break
             #train discriminator
             inputs = inputs.to(device)
-            z_d = torch.empty(args.batch_size,config.nz).uniform_(-1,1)
-            z_g = torch.empty(args.batch_size,config.nz).uniform_(-1,1)
-            fake = G(z_d)
+            z_d = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
+            z_g = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
+            fake = G(z_d).detach()
 
-            D.zero_grad()
+            optimD.zero_grad()
+            # real & fake reconstruction error
             recon_real = D(inputs)
-            recon_fake = D(fake.detach())
+            recon_fake = D(fake)
+
+            # mean
             errD_real = torch.mean(torch.abs(recon_real - inputs))
             errD_fake = torch.mean(torch.abs(recon_fake - fake))
+
+
+            # loss
             loss_D = errD_real - k_t * errD_fake
             loss_D.backward()
             optimD.step()
 
-            G.zero_grad()
-            fake = G(z_g)
-            recon_fake = D(fake)
-            loss_G = torch.mean(torch.abs(recon_fake - fake))
+            optimG.zero_grad()
+            fake_g = G(z_g)
+            recon_fake_g = D(fake_g)
+            loss_G = torch.mean(torch.abs(recon_fake_g - fake_g))
             loss_G.backward()
             optimG.step()
 
-            loss_D_history.append(loss_D)
-            loss_G_history.append(loss_G)
             g_iteration += 1
 
             # k update
-            k_t = k_t + lr_k *(gamma*recon_real - recon_fake)
+            balance = (gamma*errD_real - loss_G).item()
+            k_t = k_t + lr_k *balance
+            k_t = max(min(1, k_t),0)
+
+            measure = errD_real.item() + abs(balance)
+            measure_history.append(measure)
 
 
             #log
             if config.iter_log and g_iteration % config.iter_log == 0:
-                logging.debug('loss_D: {} loss_G:{}'.format(np.mean(loss_D_history[-config.log:]), np.mean(loss_G_history[-config.log:])))
+                measure_mean = np.mean(measure_history[-config.iter_log:])
+                print(f'[[{g_iteration}/{config.max_iter}] d_loss: {loss_D.item():.4f} '
+                              f'd_loss_real:{errD_real.item():.4f} g_loss: {loss_G:.4f} k_t:{k_t:.4f} lr: {config.lr:.7f} '
+                              f'measure: {measure_mean:.4f}'.format())
             #sample
             if config.iter_sample and g_iteration % config.iter_sample == 0:
-                img = torchvision.utils.make_grid(G(fixed_noise))
-                img = img.numpy().transpose((0,2,3,1))
-                Image.fromarray(img).save(os.path.join(sample_dir,f'{g_iteration}.jpg'))
+                print(f'[{g_iteration}] save images..')
+                fake_img = G(fixed_noise)
+                torchvision.utils.save_image(fake_img,
+                                                   os.path.join(sample_dir,f'{g_iteration}_G.png'))
+                torchvision.utils.save_image(D(x_fixed), f'{sample_dir}/{g_iteration}_D.png')
+                torchvision.utils.save_image(D(fake_img), f'{sample_dir}/{g_iteration}_fake_D.png')
+                # img = img.numpy().transpose((0,2,3,1))
+                # Image.fromarray(img).save(os.path.join(sample_dir,f'{g_iteration}.jpg'))
             #save
             if config.iter_save and g_iteration % config.iter_save ==0:
                 torch.save({
                     'iteration': g_iteration,
                     'state': G.state_dict()
-                },os.path.join(args.checkpoint, f'{g_iteration}_{loss_D}_{loss_G}_gen.pth'))
+                },os.path.join(args.checkpoint, f'{g_iteration}_gen.pth'))
                 torch.save({
                     'iteration': g_iteration,
                     'state': D.state_dict()
-                }, os.path.join(args.checkpoint, f'{g_iteration}_{loss_D}_{loss_G}_dis.pth'))
+                }, os.path.join(args.checkpoint, f'{g_iteration}_dis.pth'))
 
 if __name__ =='__main__':
 
-    train(args, G,D)
+    train(args, G,D,optimG,optimD)
+    # load_model('checkpoint')

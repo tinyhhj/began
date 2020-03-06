@@ -31,19 +31,22 @@ class Encoder(BaseModel):
         layers.append(nn.Conv2d(in_channels,hidden_channels,3,1,1))
         layers.append(nn.ELU(True))
         prev = hidden_channels
-        for idx in range(1,4):
-            if idx != 3:
+        for idx in range(1,5):
+            stride = 1
+            if idx != 4:
                 next = (idx+1)*hidden_channels
+                stride = 2
             layers.append(nn.Conv2d(prev,prev,3,1,1))
             layers.append(nn.ELU(True))
-            layers.append(nn.Conv2d(prev,next,3,2,1))
+            layers.append(nn.Conv2d(prev,next,3,stride,1))
             layers.append(nn.ELU(True))
             prev = next
         self.conv1 = nn.Sequential(*layers)
         self.conv_ouput_dim = [next,8,8]
         self.fc1 = nn.Linear(8*8*next, z_num)
     def forward(self,x):
-        x = torch.flatten(self.conv1(x),1)
+        x= self.conv1(x)
+        x = torch.flatten(x,1)
         x = self.fc1(x)
         return x
 
@@ -54,12 +57,12 @@ class Decoder(BaseModel):
         self.conv_input_dim = [cin,8,8]
         self.fc1 = nn.Linear(zn,8*8*cin)
         layers = []
-        for i in range(3):
+        for i in range(4):
             layers.append(nn.Conv2d(cin,cin,3,1,1))
             layers.append(nn.ELU(True))
             layers.append(nn.Conv2d(cin, cin, 3, 1, 1))
             layers.append(nn.ELU(True))
-            if i != 2:
+            if i != 3:
                 layers.append(nn.UpsamplingNearest2d(scale_factor=2))
         layers.append(nn.Conv2d(cin,cout,3,1,1))
         layers.append(nn.ELU(True))
@@ -86,6 +89,15 @@ class Generator(nn.Module):
     def forward(self,x):
         x = self.decoder(x)
         return x
+
+if __name__ =='__main__':
+    e = Encoder(3,64,100)
+    d = Decoder(64,3,100)
+    G = Generator(64,3,100)
+    res = G(torch.randn(16,100))
+    D = Discriminator(3,64,100)
+    res = D(res)
+    print(res.size())
 
 
 
