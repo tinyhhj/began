@@ -14,17 +14,32 @@ parser.add_argument('--cout',type=int, default=64)
 parser.add_argument('--nz',type=int,default=100)
 parser.add_argument('--ngpu', type=int,default=1)
 parser.add_argument('--batch_size', type=int,default=16)
-parser.add_argument('--lr', type=float,default=0.0001)
+parser.add_argument('--lr', type=float,default=0.00005)
 parser.add_argument('--lk', type=float, default= 0.)
 parser.add_argument('--max_iter',type=int, default=800000)
 parser.add_argument('--data', type=str, default='data')
 parser.add_argument('--input_size',type=int, default=64)
 parser.add_argument('--betas',type=int, nargs='+', default=[0.5,0.999])
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--iter_log', type=int, default=1)
-parser.add_argument('--iter_save',type=int, default=1)
-parser.add_argument('--iter_sample',type=int, default=1)
+parser.add_argument('--iter_log', type=int, default=10)
+parser.add_argument('--iter_save',type=int, default=1000)
+parser.add_argument('--iter_sample',type=int, default=10)
+parser.add_argument('--iter_update_lr',type=int, default=1000)
 
+def load_model(sample_dir):
+    global G, D, g_iteration
+    paths = glob(os.path.join(sample_dir, '*_gen.pth'))
+    if len(paths) == 0:
+        print(f'[!] no checkpoint found in {sample_dir}')
+        return
+    paths = sorted(paths)
+    indexes = [int(os.path.basename(p).split('_')[0]) for p in paths]
+    start = max(indexes)
+
+    print(f'load from {sample_dir}/{start} iteration...')
+    g_iteration = torch.load(f'{sample_dir}/{start}_gen.pth')['iteration']
+    G.load_state_dict(torch.load(f'{sample_dir}/{start}_gen.pth')['state'])
+    D.load_state_dict(torch.load(f'{sample_dir}/{start}_dis.pth')['state'])
 
 args = parser.parse_args()
 
@@ -42,47 +57,41 @@ dataset = torchvision.datasets.ImageFolder(args.data,transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, shuffle= True, batch_size=args.batch_size)
 args.ngpu = list(range(args.ngpu))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+x_fixed = []
+for i in [10735, 18040,  9928,  3293, 18634,  9515, 11419,  8482,  9744,6432, 16820,  4729,  2476,  5816, 10218,  5094]:
+    x_fixed.append(dataset[i][0])
+x_fixed = torch.stack(x_fixed).to(device)
+# x_fixed, _ = next(iter(dataloader))
+if not os.path.exists(f'{sample_dir}/x_fixed.png'):
+    torchvision.utils.save_image(x_fixed, f'{sample_dir}/x_fixed.png')
 
 G = Generator(args.cout, args.cin, args.nz).to(device)
 D = Discriminator(args.cin, args.cout, args.nz).to(device)
+g_iteration = 0
+load_model(args.checkpoint)
 
-
-if len(args.ngpu) > 0:
+if len(args.ngpu) > 1:
     G = torch.nn.DataParallel(G, args.ngpu)
     D = torch.nn.DataParallel(D, args.ngpu)
 
 optimG = torch.optim.Adam(G.parameters(), lr=args.lr, betas=args.betas)
 optimD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=args.betas)
-
-def load_model(sample_dir):
-    global G, D
-
-
-    paths = glob(os.path.join(sample_dir, '*_gen.pth'))
-    if len(paths) == 0:
-        print(f'[!] no checkpoint found in {sample_dir}')
-        return
-    paths = sorted(paths)
-    indexes = [os.path.basename(p).split('_')[0] for p in paths]
-    start = max(indexes)
-
-    print(f'load from {sample_dir}/{start} iteration...')
-    G.load_state_dict(torch.load(f'{sample_dir}/{start}_gen.pth')['state'])
-    D.load_state_dict(torch.load(f'{sample_dir}/{start}_dis.pth')['state'])
-
-
-
+schedulerG = torch.optim.lr_scheduler.StepLR(optimG, step_size=1,gamma=0.5)
+schedulerD = torch.optim.lr_scheduler.StepLR(optimD, step_size=1,gamma=0.5)
 
 def train(config,G,D,optimG,optimD):
+    global g_iteration
+    G.train()
+    D.train()
+
     k_t = 0
-    g_iteration = 0
     gamma = 0.5
     lr_k = 0.001
     epoch = 0
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
+    print(fixed_noise.dtype, fixed_noise.size())
+    print(fixed_noise[:3])
     measure_history = []
-    x_fixed, _ = next(iter(dataloader))
-    torchvision.utils.save_image(x_fixed, f'{sample_dir}/x_fixed.png')
     need_train = True
     while need_train:
         epoch += 1
@@ -134,7 +143,7 @@ def train(config,G,D,optimG,optimD):
             if config.iter_log and g_iteration % config.iter_log == 0:
                 measure_mean = np.mean(measure_history[-config.iter_log:])
                 print(f'[[{g_iteration}/{config.max_iter}] d_loss: {loss_D.item():.4f} '
-                              f'd_loss_real:{errD_real.item():.4f} g_loss: {loss_G:.4f} k_t:{k_t:.4f} lr: {config.lr:.7f} '
+                              f'd_loss_real:{errD_real.item():.4f} d_loss_fake: {errD_fake.item():.4f} g_loss: {loss_G:.4f} k_t:{k_t:.4f} lr: {config.lr:.7f} '
                               f'measure: {measure_mean:.4f}'.format())
             #sample
             if config.iter_sample and g_iteration % config.iter_sample == 0:
