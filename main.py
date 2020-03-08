@@ -14,16 +14,16 @@ parser.add_argument('--cout',type=int, default=64)
 parser.add_argument('--nz',type=int,default=100)
 parser.add_argument('--ngpu', type=int,default=1)
 parser.add_argument('--batch_size', type=int,default=16)
-parser.add_argument('--lr', type=float,default=0.00005)
+parser.add_argument('--lr', type=float,default=0.0001)
 parser.add_argument('--lk', type=float, default= 0.)
-parser.add_argument('--max_iter',type=int, default=800000)
+parser.add_argument('--max_iter',type=int, default=50000)
 parser.add_argument('--data', type=str, default='data')
 parser.add_argument('--input_size',type=int, default=64)
 parser.add_argument('--betas',type=int, nargs='+', default=[0.5,0.999])
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--iter_log', type=int, default=10)
+parser.add_argument('--iter_log', type=int, default=1000)
 parser.add_argument('--iter_save',type=int, default=1000)
-parser.add_argument('--iter_sample',type=int, default=10)
+parser.add_argument('--iter_sample',type=int, default=1000)
 parser.add_argument('--iter_update_lr',type=int, default=1000)
 
 def load_model(sample_dir):
@@ -53,7 +53,8 @@ transform = torchvision.transforms.Compose([
     torchvision.transforms.Resize([args.input_size,args.input_size]),
     torchvision.transforms.ToTensor()
 ])
-dataset = torchvision.datasets.ImageFolder(args.data,transform=transform)
+# dataset = torchvision.datasets.ImageFolder(args.data,transform=transform)
+dataset = torchvision.datasets.LSUN('./lsun',classes=['bedroom_train'],transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, shuffle= True, batch_size=args.batch_size)
 args.ngpu = list(range(args.ngpu))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -83,14 +84,15 @@ def train(config,G,D,optimG,optimD):
     global g_iteration
     G.train()
     D.train()
-
+    prev_measure = 1
     k_t = 0
     gamma = 0.5
     lr_k = 0.001
     epoch = 0
+    tolerance = 3
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
-    print(fixed_noise.dtype, fixed_noise.size())
-    print(fixed_noise[:3])
+    # print(fixed_noise.dtype, fixed_noise.size())
+    # print(fixed_noise[:3])
     measure_history = []
     need_train = True
     while need_train:
@@ -106,10 +108,13 @@ def train(config,G,D,optimG,optimD):
             z_g = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
             fake = G(z_d).detach()
 
+
             optimD.zero_grad()
+
             # real & fake reconstruction error
             recon_real = D(inputs)
             recon_fake = D(fake)
+
 
             # mean
             errD_real = torch.mean(torch.abs(recon_real - inputs))
@@ -118,9 +123,10 @@ def train(config,G,D,optimG,optimD):
 
             # loss
             loss_D = errD_real - k_t * errD_fake
-            loss_D.backward()
-            optimD.step()
 
+            loss_D.backward()
+
+            optimD.step()
             optimG.zero_grad()
             fake_g = G(z_g)
             recon_fake_g = D(fake_g)
@@ -131,7 +137,7 @@ def train(config,G,D,optimG,optimD):
             g_iteration += 1
 
             # k update
-            balance = (gamma*errD_real - loss_G).item()
+            balance = (gamma*errD_real - errD_fake).item()
             k_t = k_t + lr_k *balance
             k_t = max(min(1, k_t),0)
 
@@ -143,7 +149,7 @@ def train(config,G,D,optimG,optimD):
             if config.iter_log and g_iteration % config.iter_log == 0:
                 measure_mean = np.mean(measure_history[-config.iter_log:])
                 print(f'[[{g_iteration}/{config.max_iter}] d_loss: {loss_D.item():.4f} '
-                              f'd_loss_real:{errD_real.item():.4f} d_loss_fake: {errD_fake.item():.4f} g_loss: {loss_G:.4f} k_t:{k_t:.4f} lr: {config.lr:.7f} '
+                              f'd_loss_real:{errD_real.item():.4f} d_loss_fake: {errD_fake.item():.4f} g_loss: {loss_G:.4f} k_t:{k_t:.4f} lr: {optimD.defaults["lr"]:.7f} '
                               f'measure: {measure_mean:.4f}'.format())
             #sample
             if config.iter_sample and g_iteration % config.iter_sample == 0:
@@ -165,6 +171,18 @@ def train(config,G,D,optimG,optimD):
                     'iteration': g_iteration,
                     'state': D.state_dict()
                 }, os.path.join(args.checkpoint, f'{g_iteration}_dis.pth'))
+            # update lr
+            if config.iter_update_lr and g_iteration % config.iter_update_lr:
+                current_measure = np.mean(measure_history[-config.iter_update_lr:])
+                if current_measure > prev_measure * 0.999:
+                    tolerance -= 1
+                    if tolerance == 0:
+                        schedulerD.step()
+                        schedulerG.step()
+                else:
+                    tolerance = 3
+                print(f'prev_measure: {prev_measure} cur_messure: {current_measure} tolerance: {tolerance}')
+                prev_measure = current_measure
 
 if __name__ =='__main__':
 
