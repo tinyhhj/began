@@ -21,7 +21,7 @@ parser.add_argument('--data', type=str, default='data')
 parser.add_argument('--input_size',type=int, default=64)
 parser.add_argument('--betas',type=int, nargs='+', default=[0.5,0.999])
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--iter_log', type=int, default=10)
+parser.add_argument('--iter_log', type=int, default=100)
 parser.add_argument('--iter_save',type=int, default=1000)
 parser.add_argument('--iter_sample',type=int, default=10)
 parser.add_argument('--iter_update_lr',type=int, default=1000)
@@ -51,16 +51,41 @@ os.makedirs(sample_dir,exist_ok=True)
 
 transform = torchvision.transforms.Compose([
     torchvision.transforms.Resize([args.input_size,args.input_size]),
-    torchvision.transforms.ToTensor()
+    torchvision.transforms.RandomHorizontalFlip(),
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
 ])
+
+# class MDataset(torch.utils.data.Dataset):
+#   def __init__(self,root,transform=None):
+#     self.root = os.path.join(root,'faces')
+#     self.data = []
+#     for d in os.listdir(self.root):
+#       if d.startswith('._'):
+#         self.data.append(d[2:])
+#       else:
+#         self.data.append(d)
+#     self.transform = transform
+#   def __len__(self):
+#     return len(self.data)
+#   def __getitem__(self,index):
+#     img =  Image.open(os.path.join(self.root,self.data[index]))
+#     if self.transform:
+#       img =  self.transform(img)
+#     return img , 0
+
 dataset = torchvision.datasets.ImageFolder(args.data,transform=transform)
+# dataset = MDataset(args.data, transform)
 dataloader = torch.utils.data.DataLoader(dataset, shuffle= True, batch_size=args.batch_size)
+
 args.ngpu = list(range(args.ngpu))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 x_fixed = []
 for i in [10735, 18040,  9928,  3293, 18634,  9515, 11419,  8482,  9744,6432, 16820,  4729,  2476,  5816, 10218,  5094]:
     x_fixed.append(dataset[i][0])
 x_fixed = torch.stack(x_fixed).to(device)
+
+
 # x_fixed, _ = next(iter(dataloader))
 if not os.path.exists(f'{sample_dir}/x_fixed.png'):
     torchvision.utils.save_image(x_fixed, f'{sample_dir}/x_fixed.png')
@@ -79,6 +104,7 @@ optimD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=args.betas)
 schedulerG = torch.optim.lr_scheduler.StepLR(optimG, step_size=1,gamma=0.5)
 schedulerD = torch.optim.lr_scheduler.StepLR(optimD, step_size=1,gamma=0.5)
 
+
 def train(config,G,D,optimG,optimD):
     global g_iteration
     G.train()
@@ -89,8 +115,6 @@ def train(config,G,D,optimG,optimD):
     lr_k = 0.001
     epoch = 0
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
-    print(fixed_noise.dtype, fixed_noise.size())
-    print(fixed_noise[:3])
     measure_history = []
     need_train = True
     while need_train:
@@ -102,31 +126,36 @@ def train(config,G,D,optimG,optimD):
                 break
             #train discriminator
             inputs = inputs.to(device)
-            z_d = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
+            # z_d = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
             z_g = torch.empty(args.batch_size,config.nz).uniform_(-1,1).to(device)
-            fake = G(z_d).detach()
+            # fake = G(z_d).detach()
 
             optimD.zero_grad()
+            optimG.zero_grad()
+            fake_g = G(z_g)
             # real & fake reconstruction error
             recon_real = D(inputs)
-            recon_fake = D(fake)
+            recon_fake = D(fake_g.detach())
+            recon_fake_g = D(fake_g)
 
             # mean
             errD_real = torch.mean(torch.abs(recon_real - inputs))
-            errD_fake = torch.mean(torch.abs(recon_fake - fake))
+            errD_fake = torch.mean(torch.abs(recon_fake - fake_g.detach()))
 
 
             # loss
             loss_D = errD_real - k_t * errD_fake
             loss_D.backward()
             optimD.step()
-
-            optimG.zero_grad()
-            fake_g = G(z_g)
-            recon_fake_g = D(fake_g)
             loss_G = torch.mean(torch.abs(recon_fake_g - fake_g))
             loss_G.backward()
             optimG.step()
+
+
+            #
+            # loss_G = torch.mean(torch.abs(recon_fake_g - fake_g))
+            # loss_G.backward()
+
 
             g_iteration += 1
 
