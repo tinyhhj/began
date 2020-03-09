@@ -11,7 +11,7 @@ from glob import glob
 parser = argparse.ArgumentParser()
 parser.add_argument('--cin',type=int, default=3)
 parser.add_argument('--cout',type=int, default=64)
-parser.add_argument('--nz',type=int,default=256)
+parser.add_argument('--nz',type=int,default=64)
 parser.add_argument('--ngpu', type=int,default=1)
 parser.add_argument('--batch_size', type=int,default=16)
 parser.add_argument('--lr', type=float,default=0.0001)
@@ -56,7 +56,7 @@ transform = torchvision.transforms.Compose([
     torchvision.transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
 ])
 # dataset = torchvision.datasets.ImageFolder(args.data,transform=transform)
-dataset = torchvision.datasets.LSUN('./lsun',classes=['bedroom_train'],transform=transform)
+dataset = torchvision.datasets.LSUN(args.data,classes=['bedroom_train'],transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, shuffle= True, batch_size=args.batch_size)
 
 args.ngpu = list(range(args.ngpu))
@@ -91,7 +91,7 @@ def train(config,G,D,optimG,optimD):
     G.train()
     D.train()
     prev_measure = 1
-    k_t = 0.5
+    k_t = 0
     gamma = 0.5
     lr_k = 0.001
     epoch = 0
