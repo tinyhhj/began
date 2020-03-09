@@ -2,12 +2,12 @@ import torch
 import torchvision
 import torch.nn as nn
 
-root = 'data/chap12'
-transform = torchvision.transforms.Compose([
-    torchvision.transforms.ToTensor()
-])
-dataset = torchvision.datasets.ImageFolder(root, transform=transform)
-dataloader = torch.utils.data.DataLoader(dataset, shuffle=True, batch_size=4)
+# root = 'data/chap12'
+# transform = torchvision.transforms.Compose([
+#     torchvision.transforms.ToTensor()
+# ])
+# dataset = torchvision.datasets.ImageFolder(root, transform=transform)
+# dataloader = torch.utils.data.DataLoader(dataset, shuffle=True, batch_size=4)
 class BaseModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -94,10 +94,7 @@ if __name__ =='__main__':
     e = Encoder(3,64,100)
     d = Decoder(64,3,100)
     G = Generator(64,3,100)
-    res = G(torch.randn(16,100))
-    D = Discriminator(3,64,100)
-    res = D(res)
-    print(res.size())
+    print(list(G.named_children()))
 
 
 
