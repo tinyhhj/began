@@ -98,6 +98,7 @@ def train(config,G,D,optimG,optimD):
     for idx,k_t in enumerate(arr_k_t):
         for gamma in arr_gamma:
             for lr_k in arr_lr_k:
+                g_iteration = 0
                 args.checkpoint = f'checkpoint/{arr_k_t[idx]}_{gamma}_{lr_k}'
                 sample_dir = os.path.join(args.checkpoint, 'samples')
                 os.makedirs(sample_dir, exist_ok=True)
