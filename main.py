@@ -95,12 +95,13 @@ def train(config,G,D,optimG,optimD):
     arr_gamma = [0.5,0.6,0.7]
     arr_lr_k = [0.01,0.001,0.001]
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
-    for k_t in arr_k_t:
+    for idx,k_t in enumerate(arr_k_t):
         for gamma in arr_gamma:
             for lr_k in arr_lr_k:
-                args.checkpoint = f'checkpoint/{k_t}_{gamma}_{lr_k}'
+                args.checkpoint = f'checkpoint/{arr_k_t[idx]}_{gamma}_{lr_k}'
                 sample_dir = os.path.join(args.checkpoint, 'samples')
                 os.makedirs(sample_dir, exist_ok=True)
+                g_iteration = 0
                 epoch = 0
                 tolerance = 3
                 measure_history = []
@@ -188,6 +189,7 @@ def train(config,G,D,optimG,optimD):
                             if current_measure > prev_measure * 0.999:
                                 tolerance -= 1
                                 if tolerance == 0:
+                                    tolerance = 3
                                     schedulerD.step()
                                     schedulerG.step()
                             else:
