@@ -91,15 +91,15 @@ def train(config,G,D,optimG,optimD):
     G.train()
     D.train()
     prev_measure = 1
-    arr_k_t = [0.,0.3,0.6,0.9]
-    arr_gamma = [0.5,0.6,0.7]
-    arr_lr_k = [0.01,0.001,0.001]
+    arr_k_t = [0.6]
+    arr_gamma = [0.7]
+    arr_lr_k = [0.001,0.0001]
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
     for idx,k_t in enumerate(arr_k_t):
         for gamma in arr_gamma:
             for lr_k in arr_lr_k:
                 g_iteration = 0
-                args.checkpoint = f'checkpoint/{arr_k_t[idx]}_{gamma}_{lr_k}'
+                args.checkpoint = f'{args.checkpoint}/{arr_k_t[idx]}_{gamma}_{lr_k}'
                 sample_dir = os.path.join(args.checkpoint, 'samples')
                 os.makedirs(sample_dir, exist_ok=True)
                 g_iteration = 0
