@@ -11,12 +11,12 @@ from glob import glob
 parser = argparse.ArgumentParser()
 parser.add_argument('--cin',type=int, default=3)
 parser.add_argument('--cout',type=int, default=64)
-parser.add_argument('--nz',type=int,default=64)
+parser.add_argument('--nz',type=int,default=256)
 parser.add_argument('--ngpu', type=int,default=1)
 parser.add_argument('--batch_size', type=int,default=16)
 parser.add_argument('--lr', type=float,default=0.0001)
 parser.add_argument('--lk', type=float, default= 0.)
-parser.add_argument('--max_iter',type=int, default=50000)
+parser.add_argument('--max_iter',type=int, default=200000)
 parser.add_argument('--data', type=str, default='data')
 parser.add_argument('--input_size',type=int, default=64)
 parser.add_argument('--betas',type=int, nargs='+', default=[0.5,0.999])
@@ -93,13 +93,14 @@ def train(config,G,D,optimG,optimD):
     prev_measure = 1
     arr_k_t = [0.6]
     arr_gamma = [0.7]
-    arr_lr_k = [0.001,0.0001]
+    arr_lr_k = [0.0001]
+    orig_checkpoint = args.checkpoint
     fixed_noise = torch.empty(args.batch_size, args.nz, device=device).uniform_(-1, 1)
     for idx,k_t in enumerate(arr_k_t):
         for gamma in arr_gamma:
             for lr_k in arr_lr_k:
                 g_iteration = 0
-                args.checkpoint = f'{args.checkpoint}/{arr_k_t[idx]}_{gamma}_{lr_k}'
+                args.checkpoint = f'{orig_checkpoint}/{arr_k_t[idx]}_{gamma}_{lr_k}'
                 sample_dir = os.path.join(args.checkpoint, 'samples')
                 os.makedirs(sample_dir, exist_ok=True)
                 g_iteration = 0
