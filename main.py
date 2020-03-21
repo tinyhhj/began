@@ -85,6 +85,8 @@ optimD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=args.betas)
 schedulerG = torch.optim.lr_scheduler.StepLR(optimG, step_size=1,gamma=0.5)
 schedulerD = torch.optim.lr_scheduler.StepLR(optimD, step_size=1,gamma=0.5)
 
+def denormalize(img):
+    return img * 0.5 + 0.5
 
 def train(config,G,D,optimG,optimD):
     global g_iteration
@@ -168,11 +170,12 @@ def train(config,G,D,optimG,optimD):
                         #sample
                         if config.iter_sample and g_iteration % config.iter_sample == 0:
                             print(f'[{g_iteration}] save images..')
-                            fake_img = G(fixed_noise)
-                            torchvision.utils.save_image(fake_img,
-                                                               os.path.join(sample_dir,f'{g_iteration}_G.png'),normalize=True)
-                            torchvision.utils.save_image(D(x_fixed), f'{sample_dir}/{g_iteration}_D.png',normalize=True)
-                            torchvision.utils.save_image(D(fake_img), f'{sample_dir}/{g_iteration}_fake_D.png',normalize=True)
+                            fake_img = denormalize(G(fixed_noise))
+                            dis_real_img = denormalize(D(x_fixed))
+                            dis_fake_img = denormalize(D(fake_img))
+                            torchvision.utils.save_image(fake_img,os.path.join(sample_dir,f'{g_iteration}_G.png'))
+                            torchvision.utils.save_image(dis_real_img, f'{sample_dir}/{g_iteration}_D.png')
+                            torchvision.utils.save_image(dis_fake_img, f'{sample_dir}/{g_iteration}_fake_D.png')
                             # img = img.numpy().transpose((0,2,3,1))
                             # Image.fromarray(img).save(os.path.join(sample_dir,f'{g_iteration}.jpg'))
                         #save
