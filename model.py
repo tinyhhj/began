@@ -14,7 +14,7 @@ class BaseModel(nn.Module):
         def init_func(m):
             classname = m.__class__.__name__
             if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
-                nn.init.normal_(m.weight.data, 0.0, 0.02)
+                nn.init.kaiming_uniform_(m.weight,mode='fan_out')
                 if hasattr(m, 'bias') and m.bias is not None:
                     nn.init.constant_(m.bias.data, 0.0)
 
